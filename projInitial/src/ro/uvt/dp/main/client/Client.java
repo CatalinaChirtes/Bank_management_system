@@ -1,8 +1,12 @@
 package ro.uvt.dp.main.client;
 
+import java.sql.*;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.LinkedList;
 import java.util.List;
 
+import ro.uvt.dp.DatabaseConnection;
 import ro.uvt.dp.exceptions.AccountNotFoundException;
 import ro.uvt.dp.exceptions.AmountException;
 import ro.uvt.dp.exceptions.BlockedAccountException;
@@ -133,5 +137,85 @@ public class Client {
 
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	public void saveToDatabase(String bankName) {
+		try (Connection connection = DatabaseConnection.getConnection()) {
+			int clientId = -1;
+			int bankId = -1;
+
+			// Check if the client already exists in the database
+			boolean clientExists = clientExistsInDatabase(name, connection);
+			if (clientExists) {
+				System.out.println("Client already exists in the database.");
+
+				// Retrieve client ID from the database
+				clientId = getClientIdFromDatabase(name, connection);
+			} else {
+				// If the client doesn't exist, insert into the database
+				String query = "INSERT INTO clients (name, address, gender) VALUES (?, ?, ?)";
+
+				try (PreparedStatement preparedStatement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS)) {
+					preparedStatement.setString(1, name);
+					preparedStatement.setString(2, address);
+					preparedStatement.setString(3, gender);
+					preparedStatement.executeUpdate();
+
+					try (ResultSet generatedKeys = preparedStatement.getGeneratedKeys()) {
+						if (generatedKeys.next()) {
+							clientId = generatedKeys.getInt(1);
+						}
+					}
+				}
+			}
+
+			// Get bank ID by name
+			bankId = getBankIdFromDatabase(bankName, connection);
+
+			// Save accounts to the database if necessary
+			for (Account account : accounts) {
+				account.saveToDatabaseAccounts(clientId, bankId);
+			}
+
+		} catch (SQLException e) {
+			e.printStackTrace();
+			throw new RuntimeException("Error saving client to the database");
+		}
+	}
+
+	private boolean clientExistsInDatabase(String name, Connection connection) throws SQLException {
+		String query = "SELECT * FROM clients WHERE name = ?";
+		try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+			preparedStatement.setString(1, name);
+			try (ResultSet resultSet = preparedStatement.executeQuery()) {
+				return resultSet.next();
+			}
+		}
+	}
+
+	private int getClientIdFromDatabase(String name, Connection connection) throws SQLException {
+		String query = "SELECT id FROM clients WHERE name = ?";
+		try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+			preparedStatement.setString(1, name);
+			try (ResultSet resultSet = preparedStatement.executeQuery()) {
+				if (resultSet.next()) {
+					return resultSet.getInt("id");
+				}
+			}
+		}
+		throw new RuntimeException("Client ID not found in the database for name: " + name);
+	}
+
+	private int getBankIdFromDatabase(String name, Connection connection) throws SQLException {
+		String query = "SELECT id FROM banks WHERE bank_code = ?";
+		try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+			preparedStatement.setString(1, name);
+			try (ResultSet resultSet = preparedStatement.executeQuery()) {
+				if (resultSet.next()) {
+					return resultSet.getInt("id");
+				}
+			}
+		}
+		throw new RuntimeException("Bank ID not found in the database for name: " + name);
 	}
 }
